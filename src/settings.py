@@ -6,6 +6,11 @@ PNG_SIZE_WARNING_BYTES = 32 * 1024 * 1024
 MIN_MOSAIC_BLOCK_SIZE = 4
 DEFAULT_BRUSH_SIZE = 30
 DEFAULT_FILL_COLOR = (0, 0, 0)
+MOSAIC_SCALE_OPTIONS = (
+    ("標準", 1, 1),
+    ("2/3", 2, 3),
+    ("1/2", 1, 2),
+)
 
 
 def pixiv_block_size(width: int, height: int) -> int:
@@ -16,3 +21,8 @@ def pixiv_block_size(width: int, height: int) -> int:
 def pixiv_brush_size(block_size: int) -> int:
     del block_size
     return DEFAULT_BRUSH_SIZE
+
+
+def scaled_mosaic_block_size(block_size: int, numerator: int, denominator: int) -> int:
+    """Return a rounded block size after applying a user-selected scale."""
+    return max(1, round(block_size * numerator / denominator))

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QColorDialog,
+    QComboBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -35,9 +36,11 @@ from .history import HistoryStack
 from .image_processor import ImageLoadError, ImageProcessor, OriginalOverwriteError
 from .settings import (
     APP_NAME,
+    MOSAIC_SCALE_OPTIONS,
     PNG_SIZE_WARNING_BYTES,
     pixiv_block_size,
     pixiv_brush_size,
+    scaled_mosaic_block_size,
 )
 from .tools import BrushSettings, ToolType
 
@@ -59,6 +62,7 @@ class MainWindow(QMainWindow):
         self._auto_thread: QThread | None = None
         self._auto_worker: AutoCensorWorker | None = None
         self._pending_auto_request: tuple[int, str] | None = None
+        self._base_mosaic_block_size = 4
 
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
@@ -180,6 +184,11 @@ class MainWindow(QMainWindow):
 
         self.block_slider, self.block_value = self._make_slider(1, 512, 4)
         self.block_slider.valueChanged.connect(self._block_size_changed)
+        self.block_scale_combo = QComboBox()
+        for label, numerator, denominator in MOSAIC_SCALE_OPTIONS:
+            self.block_scale_combo.addItem(label, (numerator, denominator))
+        self.block_scale_combo.currentIndexChanged.connect(self._block_scale_changed)
+        settings_layout.addRow("モザイク倍率", self.block_scale_combo)
         settings_layout.addRow("ブロックサイズ", self._slider_row(self.block_slider, self.block_value))
 
         self.dilate_checkbox = QCheckBox("マスクを1ブロック分膨張")
@@ -259,6 +268,11 @@ class MainWindow(QMainWindow):
             self._dirty = True
             self._schedule_preview()
 
+    def _block_scale_changed(self) -> None:
+        block = self._scaled_recommended_block_size()
+        self._set_input_maximum(self.block_slider, self.block_value, max(512, block * 2))
+        self.block_slider.setValue(block)
+
     def _processing_setting_changed(self, checked: bool) -> None:
         self.brush.dilate_mosaic_mask = checked
         if self.processor.is_loaded:
@@ -269,13 +283,21 @@ class MainWindow(QMainWindow):
         if not self.processor.is_loaded:
             return
         width, height = self.processor.size
-        block = pixiv_block_size(width, height)
+        self._base_mosaic_block_size = pixiv_block_size(width, height)
+        self.block_scale_combo.setCurrentIndex(0)
+        block = self._scaled_recommended_block_size()
         brush = pixiv_brush_size(block)
         self._set_input_maximum(self.block_slider, self.block_value, max(512, block * 2))
         self._set_input_maximum(self.brush_slider, self.brush_value, max(2048, brush * 2))
         self.block_slider.setValue(block)
         self.brush_slider.setValue(brush)
         self.dilate_checkbox.setChecked(False)
+
+    def _scaled_recommended_block_size(self) -> int:
+        numerator, denominator = self.block_scale_combo.currentData() or (1, 1)
+        return scaled_mosaic_block_size(
+            self._base_mosaic_block_size, numerator, denominator
+        )
 
     def choose_color(self) -> None:
         color = QColorDialog.getColor(self._fill_color, self, "塗りつぶし色を選択")
@@ -344,9 +366,12 @@ class MainWindow(QMainWindow):
             QSignalBlocker(self.brush_slider),
             QSignalBlocker(self.block_value),
             QSignalBlocker(self.brush_value),
+            QSignalBlocker(self.block_scale_combo),
         ):
             width, height = self.processor.size
-            block = pixiv_block_size(width, height)
+            self._base_mosaic_block_size = pixiv_block_size(width, height)
+            self.block_scale_combo.setCurrentIndex(0)
+            block = self._scaled_recommended_block_size()
             brush = pixiv_brush_size(block)
             self._set_input_maximum(
                 self.block_slider, self.block_value, max(512, block * 2)

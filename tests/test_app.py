@@ -10,10 +10,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PIL import Image
 from PySide6.QtCore import QPointF, QMimeData, Qt, QUrl
 from PySide6.QtGui import QDropEvent
-from PySide6.QtWidgets import QApplication, QSpinBox
+from PySide6.QtWidgets import QApplication, QComboBox, QSpinBox
 
 from src.app import MainWindow
-from src.settings import pixiv_block_size, pixiv_brush_size
+from src.settings import pixiv_block_size, pixiv_brush_size, scaled_mosaic_block_size
 from src.tools import ToolType
 
 
@@ -72,6 +72,21 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(self.window.block_slider.value(), 17)
         self.assertEqual(self.window.brush.size, 137)
         self.assertEqual(self.window.brush.mosaic_block_size, 17)
+
+    def test_mosaic_scale_options_update_block_size(self) -> None:
+        self.window.load_image(str(self.source))
+        self.assertIsInstance(self.window.block_scale_combo, QComboBox)
+        base = pixiv_block_size(800, 400)
+
+        self.window.block_scale_combo.setCurrentIndex(1)
+        two_thirds = scaled_mosaic_block_size(base, 2, 3)
+        self.assertEqual(self.window.block_value.value(), two_thirds)
+        self.assertEqual(self.window.brush.mosaic_block_size, two_thirds)
+
+        self.window.block_scale_combo.setCurrentIndex(2)
+        half = scaled_mosaic_block_size(base, 1, 2)
+        self.assertEqual(self.window.block_value.value(), half)
+        self.assertEqual(self.window.brush.mosaic_block_size, half)
 
     def test_png_drop_loads_from_window_and_canvas_accepts_drops(self) -> None:
         mime_data = QMimeData()

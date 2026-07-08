@@ -8,7 +8,7 @@ from PIL import Image, PngImagePlugin
 
 from src.history import HistoryStack
 from src.image_processor import ImageLoadError, ImageProcessor, OriginalOverwriteError
-from src.settings import pixiv_block_size, pixiv_brush_size
+from src.settings import pixiv_block_size, pixiv_brush_size, scaled_mosaic_block_size
 from src.tools import ToolType
 
 
@@ -32,6 +32,9 @@ class ImageProcessorTests(unittest.TestCase):
         self.assertEqual(pixiv_block_size(399, 200), 4)
         self.assertEqual(pixiv_block_size(1000, 400), 10)
         self.assertEqual(pixiv_brush_size(10), 30)
+        self.assertEqual(scaled_mosaic_block_size(9, 2, 3), 6)
+        self.assertEqual(scaled_mosaic_block_size(9, 1, 2), 4)
+        self.assertEqual(scaled_mosaic_block_size(1, 1, 2), 1)
 
     def test_rejects_non_png_and_fake_png(self) -> None:
         processor = ImageProcessor()
