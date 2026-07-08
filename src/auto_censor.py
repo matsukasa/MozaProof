@@ -9,7 +9,7 @@ from typing import Callable
 import cv2
 import numpy as np
 import onnxruntime as ort
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 from PySide6.QtCore import QObject, QThread, Signal, Slot
 
 
@@ -38,6 +38,7 @@ HOTSCREEN_LABELS = (
     "EYE",
 )
 DEFAULT_CONFIDENCE = 0.15
+AUTO_MASK_EDGE_PADDING_PX = 4
 
 
 def resource_path(relative_path: str) -> Path:
@@ -355,6 +356,14 @@ class AutoCensorEngine:
     ) -> None:
         ImageDraw.Draw(output).ellipse(box, fill=255)
 
+    @staticmethod
+    def _pad_mask_edges(
+        mask: Image.Image, radius: int = AUTO_MASK_EDGE_PADDING_PX
+    ) -> Image.Image:
+        if radius <= 0 or mask.getbbox() is None:
+            return mask
+        return mask.filter(ImageFilter.MaxFilter(radius * 2 + 1))
+
     def detect(
         self,
         image_path: str | os.PathLike[str],
@@ -395,6 +404,7 @@ class AutoCensorEngine:
                 self._ellipse_fallback(output, box)
             segmented_count += 1
 
+        output = self._pad_mask_edges(output)
         return AutoCensorResult(output, len(detections), segmented_count)
 
 

@@ -4,7 +4,11 @@ APP_NAME = "Pixiv Safe Mosaic"
 PREVIEW_MAX_EDGE = 1600
 PNG_SIZE_WARNING_BYTES = 32 * 1024 * 1024
 MIN_MOSAIC_BLOCK_SIZE = 4
-DEFAULT_BRUSH_SIZE = 30
+MAX_MOSAIC_BLOCK_SIZE = 50
+DEFAULT_BRUSH_SIZE = 45
+MAX_BRUSH_SIZE = 100
+DEFAULT_MASK_DILATION_PX = 1
+MAX_MASK_DILATION_PX = 10
 DEFAULT_FILL_COLOR = (0, 0, 0)
 MOSAIC_SCALE_OPTIONS = (
     ("標準", 1, 1),
@@ -25,4 +29,4 @@ def pixiv_brush_size(block_size: int) -> int:
 
 def scaled_mosaic_block_size(block_size: int, numerator: int, denominator: int) -> int:
     """Return a rounded block size after applying a user-selected scale."""
-    return max(1, round(block_size * numerator / denominator))
+    return min(MAX_MOSAIC_BLOCK_SIZE, max(1, round(block_size * numerator / denominator)))

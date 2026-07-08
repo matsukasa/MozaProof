@@ -31,10 +31,11 @@ class ImageProcessorTests(unittest.TestCase):
     def test_pixiv_defaults(self) -> None:
         self.assertEqual(pixiv_block_size(399, 200), 4)
         self.assertEqual(pixiv_block_size(1000, 400), 10)
-        self.assertEqual(pixiv_brush_size(10), 30)
+        self.assertEqual(pixiv_brush_size(10), 45)
         self.assertEqual(scaled_mosaic_block_size(9, 2, 3), 6)
         self.assertEqual(scaled_mosaic_block_size(9, 1, 2), 4)
         self.assertEqual(scaled_mosaic_block_size(1, 1, 2), 1)
+        self.assertEqual(scaled_mosaic_block_size(200, 1, 1), 50)
 
     def test_rejects_non_png_and_fake_png(self) -> None:
         processor = ImageProcessor()
@@ -95,6 +96,13 @@ class ImageProcessorTests(unittest.TestCase):
         self.assertEqual(expanded.getpixel((6, 10)), 255)
         self.assertEqual(expanded.getpixel((18, 10)), 0)
 
+    def test_mask_dilation_expands_by_selected_pixels(self) -> None:
+        mask = Image.new("L", (20, 20), 0)
+        mask.putpixel((10, 10), 255)
+        expanded = ImageProcessor._dilate_mask_by_pixels(mask, 2)
+        self.assertEqual(expanded.getpixel((8, 10)), 255)
+        self.assertEqual(expanded.getpixel((7, 10)), 0)
+
     def test_fill_is_above_mosaic_and_alpha_is_preserved(self) -> None:
         processor = ImageProcessor()
         processor.load_png(self.make_png())
@@ -104,7 +112,7 @@ class ImageProcessorTests(unittest.TestCase):
         processor.begin_stroke(ToolType.FILL, 6, (255, 0, 0))
         processor.add_stroke_point(12, 12)
         processor.commit_stroke()
-        result = processor.render_full(4, True)
+        result = processor.render_full(4, 1)
         self.assertEqual(result.getpixel((12, 12)), (255, 0, 0, 128))
         self.assertEqual(result.getchannel("A").tobytes(), processor.original_image.getchannel("A").tobytes())
 
@@ -113,7 +121,7 @@ class ImageProcessorTests(unittest.TestCase):
         source = self.make_png()
         processor.load_png(source)
         destination = self.root / "output.png"
-        data = processor.encode_png(4, True)
+        data = processor.encode_png(4, 1)
         processor.save_encoded_png(destination, data)
         with Image.open(destination) as saved:
             self.assertEqual(saved.format, "PNG")
@@ -126,10 +134,10 @@ class ImageProcessorTests(unittest.TestCase):
         processor = ImageProcessor()
         processor.load_png(self.make_png(size=(2000, 1000)))
         self.assertEqual(processor.preview_original.size, (1600, 800))
-        processor.render_preview(20, True)
+        processor.render_preview(20, 1)
         first_layers = processor._preview_layers_cache
         first_pixelated = processor._preview_pixelated_cache[16]
-        processor.render_preview(20, True)
+        processor.render_preview(20, 1)
         self.assertIs(processor._preview_layers_cache, first_layers)
         self.assertIs(processor._preview_pixelated_cache[16], first_pixelated)
 
@@ -143,7 +151,7 @@ class ImageProcessorTests(unittest.TestCase):
         source = self.make_png()
         processor.load_png(source)
         with self.assertRaises(OriginalOverwriteError):
-            processor.save_encoded_png(source, processor.encode_png(4, True))
+            processor.save_encoded_png(source, processor.encode_png(4, 1))
 
     def test_shape_mask_can_be_applied_and_undone(self) -> None:
         processor = ImageProcessor()

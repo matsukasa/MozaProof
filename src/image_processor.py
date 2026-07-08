@@ -265,7 +265,7 @@ class ImageProcessor:
         self.invalidate_preview_layers()
         return patch
 
-    def render_preview(self, block_size: int, dilate: bool) -> Image.Image:
+    def render_preview(self, block_size: int, dilation_px: int = 0) -> Image.Image:
         if self.preview_original is None:
             raise RuntimeError("画像が読み込まれていません。")
         size = self.preview_original.size
@@ -276,16 +276,19 @@ class ImageProcessor:
                 mosaic_mask, fill_layer, stroke
             )
         scaled_block = max(1, round(block_size * self.preview_scale))
+        scaled_dilation = (
+            max(1, round(dilation_px * self.preview_scale)) if dilation_px > 0 else 0
+        )
         return self._compose(
             self.preview_original,
             mosaic_mask,
             fill_layer,
             scaled_block,
-            dilate,
+            scaled_dilation,
             pixelated=self._pixelated_preview(scaled_block),
         )
 
-    def render_full(self, block_size: int, dilate: bool) -> Image.Image:
+    def render_full(self, block_size: int, dilation_px: int = 0) -> Image.Image:
         if self.original_image is None:
             raise RuntimeError("画像が読み込まれていません。")
         assert self.mosaic_mask is not None and self.fill_layer is not None
@@ -294,7 +297,7 @@ class ImageProcessor:
             self.mosaic_mask,
             self.fill_layer,
             max(1, int(block_size)),
-            dilate,
+            max(0, int(dilation_px)),
         )
 
     def _apply_temporary_stroke(
@@ -320,7 +323,7 @@ class ImageProcessor:
         mosaic_mask: Image.Image,
         fill_layer: Image.Image,
         block_size: int,
-        dilate: bool,
+        dilation_px: int,
         *,
         pixelated: Image.Image | None = None,
     ) -> Image.Image:
@@ -329,8 +332,8 @@ class ImageProcessor:
         if pixelated is None:
             pixelated = cls._pixelate(original_rgb, block_size)
         effective_mask = mosaic_mask
-        if dilate and effective_mask.getbbox() is not None:
-            effective_mask = cls._dilate_mask_by_block(effective_mask, block_size)
+        if dilation_px > 0 and effective_mask.getbbox() is not None:
+            effective_mask = cls._dilate_mask_by_pixels(effective_mask, dilation_px)
         result_rgb = Image.composite(pixelated, original_rgb, effective_mask)
         fill_rgb = fill_layer.convert("RGB")
         result_rgb = Image.composite(fill_rgb, result_rgb, fill_layer.getchannel("A"))
@@ -338,6 +341,13 @@ class ImageProcessor:
         result.putalpha(source.getchannel("A"))
         result.info.clear()
         return result
+
+    @staticmethod
+    def _dilate_mask_by_pixels(mask: Image.Image, radius: int) -> Image.Image:
+        pixels = max(0, int(radius))
+        if pixels <= 0 or mask.getbbox() is None:
+            return mask
+        return mask.filter(ImageFilter.MaxFilter(pixels * 2 + 1))
 
     @staticmethod
     def _dilate_mask_by_block(mask: Image.Image, block_size: int) -> Image.Image:
@@ -384,8 +394,8 @@ class ImageProcessor:
         pixelated = small.resize(padded.size, Image.Resampling.NEAREST)
         return pixelated.crop((0, 0, width, height))
 
-    def encode_png(self, block_size: int, dilate: bool) -> bytes:
-        final_image = self.render_full(block_size, dilate)
+    def encode_png(self, block_size: int, dilation_px: int = 0) -> bytes:
+        final_image = self.render_full(block_size, dilation_px)
         final_image.info.clear()
         buffer = io.BytesIO()
         final_image.save(

@@ -7,7 +7,11 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from src.auto_censor import AutoCensorEngine, HotscreenDetector
+from src.auto_censor import (
+    AUTO_MASK_EDGE_PADDING_PX,
+    AutoCensorEngine,
+    HotscreenDetector,
+)
 
 
 class FakeDetector:
@@ -98,6 +102,7 @@ class AutoCensorEngineTests(unittest.TestCase):
         self.assertEqual(result.segmented_count, 1)
         bbox = result.mask.getbbox()
         self.assertIsNotNone(bbox)
+        self.assertEqual(bbox[0], 20 - AUTO_MASK_EDGE_PADDING_PX)
         self.assertEqual(result.mask.getpixel((bbox[0], bbox[1])), 0)
         self.assertEqual(
             result.mask.getpixel(((bbox[0] + bbox[2]) // 2, (bbox[1] + bbox[3]) // 2)),

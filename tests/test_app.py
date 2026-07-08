@@ -13,7 +13,15 @@ from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import QApplication, QComboBox, QSpinBox
 
 from src.app import MainWindow
-from src.settings import pixiv_block_size, pixiv_brush_size, scaled_mosaic_block_size
+from src.settings import (
+    DEFAULT_MASK_DILATION_PX,
+    MAX_BRUSH_SIZE,
+    MAX_MASK_DILATION_PX,
+    MAX_MOSAIC_BLOCK_SIZE,
+    pixiv_block_size,
+    pixiv_brush_size,
+    scaled_mosaic_block_size,
+)
 from src.tools import ToolType
 
 
@@ -42,7 +50,12 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(self.window.brush.size, pixiv_brush_size(block))
         self.assertFalse(self.window.brush.dilate_mosaic_mask)
         self.assertFalse(self.window.dilate_checkbox.isChecked())
+        self.assertEqual(self.window._mask_dilation_px(), 0)
+        self.assertEqual(self.window.dilation_value.value(), DEFAULT_MASK_DILATION_PX)
+        self.assertFalse(self.window.dilation_value.isEnabled())
         self.assertEqual(self.window.brush.tool, ToolType.MOSAIC)
+        self.assertNotIn(ToolType.PAN, self.window.tool_buttons)
+        self.assertEqual(self.window.tool_buttons[ToolType.ERASER].text(), "モザイクを解除")
         self.assertTrue(self.window.canvas.has_image())
         self.assertTrue(self.window.save_action.isEnabled())
         self.assertEqual(self.window.image_dimensions_label.text(), "800 × 400 px")
@@ -66,12 +79,23 @@ class MainWindowTests(unittest.TestCase):
     def test_numeric_inputs_update_slider_and_brush_settings(self) -> None:
         self.assertIsInstance(self.window.brush_value, QSpinBox)
         self.assertIsInstance(self.window.block_value, QSpinBox)
-        self.window.brush_value.setValue(137)
+        self.assertEqual(self.window.brush_value.maximum(), MAX_BRUSH_SIZE)
+        self.assertEqual(self.window.block_value.maximum(), MAX_MOSAIC_BLOCK_SIZE)
+        self.window.brush_value.setValue(88)
         self.window.block_value.setValue(17)
-        self.assertEqual(self.window.brush_slider.value(), 137)
+        self.assertEqual(self.window.brush_slider.value(), 88)
         self.assertEqual(self.window.block_slider.value(), 17)
-        self.assertEqual(self.window.brush.size, 137)
+        self.assertEqual(self.window.brush.size, 88)
         self.assertEqual(self.window.brush.mosaic_block_size, 17)
+
+    def test_mask_dilation_uses_selected_pixel_value_only_when_enabled(self) -> None:
+        self.window.load_image(str(self.source))
+        self.assertEqual(self.window.dilation_value.maximum(), MAX_MASK_DILATION_PX)
+        self.window.dilation_value.setValue(4)
+        self.assertEqual(self.window._mask_dilation_px(), 0)
+        self.window.dilate_checkbox.setChecked(True)
+        self.assertTrue(self.window.dilation_value.isEnabled())
+        self.assertEqual(self.window._mask_dilation_px(), 4)
 
     def test_mosaic_scale_options_update_block_size(self) -> None:
         self.window.load_image(str(self.source))

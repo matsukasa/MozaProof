@@ -41,7 +41,7 @@ class ImageCanvas(QGraphicsView):
 
         self._image_size = (0, 0)
         self._tool = ToolType.MOSAIC
-        self._brush_size = 30
+        self._brush_size = 45
         self._painting = False
         self._panning = False
         self._space_down = False
@@ -52,8 +52,6 @@ class ImageCanvas(QGraphicsView):
 
     def set_tool(self, tool: ToolType) -> None:
         self._tool = tool
-        if tool is ToolType.PAN:
-            self._cursor.hide()
 
     def set_brush_size(self, size: int) -> None:
         self._brush_size = max(1, size)
@@ -95,7 +93,6 @@ class ImageCanvas(QGraphicsView):
         pan_requested = (
             event.button() == Qt.MouseButton.MiddleButton
             or (event.button() == Qt.MouseButton.LeftButton and self._space_down)
-            or (event.button() == Qt.MouseButton.LeftButton and self._tool is ToolType.PAN)
         )
         if pan_requested:
             self._panning = True
@@ -106,7 +103,6 @@ class ImageCanvas(QGraphicsView):
         if (
             event.button() == Qt.MouseButton.LeftButton
             and self.has_image()
-            and self._tool is not ToolType.PAN
         ):
             point = self.mapToScene(event.position().toPoint())
             if self.sceneRect().contains(point):
@@ -157,7 +153,7 @@ class ImageCanvas(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def _update_cursor(self, viewport_point: QPoint) -> None:
-        if not self.has_image() or self._tool is ToolType.PAN or self._panning:
+        if not self.has_image() or self._panning:
             self._cursor.hide()
             return
         point = self.mapToScene(viewport_point)

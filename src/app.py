@@ -36,6 +36,11 @@ from .history import HistoryStack
 from .image_processor import ImageLoadError, ImageProcessor, OriginalOverwriteError
 from .settings import (
     APP_NAME,
+    DEFAULT_BRUSH_SIZE,
+    DEFAULT_MASK_DILATION_PX,
+    MAX_BRUSH_SIZE,
+    MAX_MASK_DILATION_PX,
+    MAX_MOSAIC_BLOCK_SIZE,
     MOSAIC_SCALE_OPTIONS,
     PNG_SIZE_WARNING_BYTES,
     pixiv_block_size,
@@ -164,8 +169,7 @@ class MainWindow(QMainWindow):
         for tool, label in (
             (ToolType.MOSAIC, "モザイクブラシ"),
             (ToolType.FILL, "塗りつぶしブラシ"),
-            (ToolType.ERASER, "消しゴム"),
-            (ToolType.PAN, "移動 / 表示操作"),
+            (ToolType.ERASER, "モザイクを解除"),
         ):
             button = QRadioButton(label)
             button.toggled.connect(
@@ -178,11 +182,15 @@ class MainWindow(QMainWindow):
 
         settings_group = QGroupBox("ブラシ設定")
         settings_layout = QFormLayout(settings_group)
-        self.brush_slider, self.brush_value = self._make_slider(1, 2048, 30)
+        self.brush_slider, self.brush_value = self._make_slider(
+            1, MAX_BRUSH_SIZE, DEFAULT_BRUSH_SIZE
+        )
         self.brush_slider.valueChanged.connect(self._brush_size_changed)
         settings_layout.addRow("ブラシサイズ", self._slider_row(self.brush_slider, self.brush_value))
 
-        self.block_slider, self.block_value = self._make_slider(1, 512, 4)
+        self.block_slider, self.block_value = self._make_slider(
+            1, MAX_MOSAIC_BLOCK_SIZE, 4
+        )
         self.block_slider.valueChanged.connect(self._block_size_changed)
         self.block_scale_combo = QComboBox()
         for label, numerator, denominator in MOSAIC_SCALE_OPTIONS:
@@ -191,10 +199,17 @@ class MainWindow(QMainWindow):
         settings_layout.addRow("モザイク倍率", self.block_scale_combo)
         settings_layout.addRow("ブロックサイズ", self._slider_row(self.block_slider, self.block_value))
 
-        self.dilate_checkbox = QCheckBox("マスクを1ブロック分膨張")
+        self.dilate_checkbox = QCheckBox("マスクをピクセル単位で膨張")
         self.dilate_checkbox.setChecked(False)
         self.dilate_checkbox.toggled.connect(self._processing_setting_changed)
         settings_layout.addRow(self.dilate_checkbox)
+        self.dilation_value = QSpinBox()
+        self.dilation_value.setRange(1, MAX_MASK_DILATION_PX)
+        self.dilation_value.setValue(DEFAULT_MASK_DILATION_PX)
+        self.dilation_value.setSuffix(" px")
+        self.dilation_value.setEnabled(False)
+        self.dilation_value.valueChanged.connect(self._processing_setting_changed)
+        settings_layout.addRow("膨張量", self.dilation_value)
 
         self.reset_button = QPushButton("pixiv推奨値に戻す")
         self.reset_button.clicked.connect(self.reset_pixiv_values)
@@ -270,11 +285,15 @@ class MainWindow(QMainWindow):
 
     def _block_scale_changed(self) -> None:
         block = self._scaled_recommended_block_size()
-        self._set_input_maximum(self.block_slider, self.block_value, max(512, block * 2))
+        self._set_input_maximum(
+            self.block_slider, self.block_value, MAX_MOSAIC_BLOCK_SIZE
+        )
         self.block_slider.setValue(block)
 
-    def _processing_setting_changed(self, checked: bool) -> None:
-        self.brush.dilate_mosaic_mask = checked
+    def _processing_setting_changed(self, *_args) -> None:
+        self.brush.dilate_mosaic_mask = self.dilate_checkbox.isChecked()
+        self.brush.mosaic_mask_dilation_px = self.dilation_value.value()
+        self.dilation_value.setEnabled(self.brush.dilate_mosaic_mask)
         if self.processor.is_loaded:
             self._dirty = True
             self._schedule_preview()
@@ -287,17 +306,25 @@ class MainWindow(QMainWindow):
         self.block_scale_combo.setCurrentIndex(0)
         block = self._scaled_recommended_block_size()
         brush = pixiv_brush_size(block)
-        self._set_input_maximum(self.block_slider, self.block_value, max(512, block * 2))
-        self._set_input_maximum(self.brush_slider, self.brush_value, max(2048, brush * 2))
+        self._set_input_maximum(
+            self.block_slider, self.block_value, MAX_MOSAIC_BLOCK_SIZE
+        )
+        self._set_input_maximum(self.brush_slider, self.brush_value, MAX_BRUSH_SIZE)
         self.block_slider.setValue(block)
         self.brush_slider.setValue(brush)
         self.dilate_checkbox.setChecked(False)
+        self.dilation_value.setValue(DEFAULT_MASK_DILATION_PX)
 
     def _scaled_recommended_block_size(self) -> int:
         numerator, denominator = self.block_scale_combo.currentData() or (1, 1)
         return scaled_mosaic_block_size(
             self._base_mosaic_block_size, numerator, denominator
         )
+
+    def _mask_dilation_px(self) -> int:
+        if not self.brush.dilate_mosaic_mask:
+            return 0
+        return min(MAX_MASK_DILATION_PX, max(1, self.brush.mosaic_mask_dilation_px))
 
     def choose_color(self) -> None:
         color = QColorDialog.getColor(self._fill_color, self, "塗りつぶし色を選択")
@@ -367,6 +394,8 @@ class MainWindow(QMainWindow):
             QSignalBlocker(self.block_value),
             QSignalBlocker(self.brush_value),
             QSignalBlocker(self.block_scale_combo),
+            QSignalBlocker(self.dilate_checkbox),
+            QSignalBlocker(self.dilation_value),
         ):
             width, height = self.processor.size
             self._base_mosaic_block_size = pixiv_block_size(width, height)
@@ -374,10 +403,10 @@ class MainWindow(QMainWindow):
             block = self._scaled_recommended_block_size()
             brush = pixiv_brush_size(block)
             self._set_input_maximum(
-                self.block_slider, self.block_value, max(512, block * 2)
+                self.block_slider, self.block_value, MAX_MOSAIC_BLOCK_SIZE
             )
             self._set_input_maximum(
-                self.brush_slider, self.brush_value, max(2048, brush * 2)
+                self.brush_slider, self.brush_value, MAX_BRUSH_SIZE
             )
             self.block_slider.setValue(block)
             self.brush_slider.setValue(brush)
@@ -385,7 +414,11 @@ class MainWindow(QMainWindow):
             self.brush_value.setValue(brush)
             self.brush.mosaic_block_size = block
             self.brush.size = brush
-        self.dilate_checkbox.setChecked(False)
+            self.dilate_checkbox.setChecked(False)
+            self.dilation_value.setValue(DEFAULT_MASK_DILATION_PX)
+            self.dilation_value.setEnabled(False)
+            self.brush.dilate_mosaic_mask = False
+            self.brush.mosaic_mask_dilation_px = DEFAULT_MASK_DILATION_PX
         self.canvas.set_brush_size(self.brush.size)
         self.tool_buttons[ToolType.MOSAIC].setChecked(True)
         self._refresh_preview(fit=True)
@@ -541,7 +574,7 @@ class MainWindow(QMainWindow):
         if not self.processor.is_loaded or self._comparing:
             return
         image = self.processor.render_preview(
-            self.brush.mosaic_block_size, self.brush.dilate_mosaic_mask
+            self.brush.mosaic_block_size, self._mask_dilation_px()
         )
         self.canvas.set_preview(
             self._pil_pixmap(image), self.processor.size, fit=fit
@@ -607,7 +640,7 @@ class MainWindow(QMainWindow):
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             data = self.processor.encode_png(
-                self.brush.mosaic_block_size, self.brush.dilate_mosaic_mask
+                self.brush.mosaic_block_size, self._mask_dilation_px()
             )
         except (OSError, ValueError, RuntimeError) as exc:
             QMessageBox.critical(self, "保存エラー", f"PNGの生成に失敗しました。\n{exc}")
