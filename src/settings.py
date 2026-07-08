@@ -1,0 +1,18 @@
+from __future__ import annotations
+
+APP_NAME = "Pixiv Safe Mosaic"
+PREVIEW_MAX_EDGE = 1600
+PNG_SIZE_WARNING_BYTES = 32 * 1024 * 1024
+MIN_MOSAIC_BLOCK_SIZE = 4
+DEFAULT_BRUSH_SIZE = 30
+DEFAULT_FILL_COLOR = (0, 0, 0)
+
+
+def pixiv_block_size(width: int, height: int) -> int:
+    """Return the requested pixiv-oriented block size for an image."""
+    return max(MIN_MOSAIC_BLOCK_SIZE, round(max(width, height) / 100))
+
+
+def pixiv_brush_size(block_size: int) -> int:
+    del block_size
+    return DEFAULT_BRUSH_SIZE

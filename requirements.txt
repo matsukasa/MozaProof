@@ -1,0 +1,6 @@
+PySide6
+Pillow
+PyInstaller
+numpy
+onnxruntime
+opencv-python-headless
