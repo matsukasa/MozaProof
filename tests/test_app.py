@@ -4,13 +4,14 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
 from PySide6.QtCore import QPointF, QMimeData, Qt, QUrl
 from PySide6.QtGui import QDropEvent
-from PySide6.QtWidgets import QApplication, QComboBox, QSpinBox
+from PySide6.QtWidgets import QApplication, QComboBox, QMessageBox, QSpinBox
 
 from src.app import MainWindow
 from src.settings import (
@@ -96,6 +97,29 @@ class MainWindowTests(unittest.TestCase):
         self.window.dilate_checkbox.setChecked(True)
         self.assertTrue(self.window.dilation_value.isEnabled())
         self.assertEqual(self.window._mask_dilation_px(), 4)
+
+    def test_unsaved_confirm_messages_are_context_specific(self) -> None:
+        self.window._dirty = True
+        with patch(
+            "src.app.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.No,
+        ) as question:
+            self.assertFalse(self.window._confirm_discard_for_new_image())
+            new_image_title = question.call_args.args[1]
+            new_image_message = question.call_args.args[2]
+
+        with patch(
+            "src.app.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.No,
+        ) as question:
+            self.assertFalse(self.window._confirm_discard_for_close())
+            close_title = question.call_args.args[1]
+            close_message = question.call_args.args[2]
+
+        self.assertIn("別の画像", new_image_title)
+        self.assertIn("別の画像を開きますか", new_image_message)
+        self.assertIn("終了", close_title)
+        self.assertIn("アプリを終了しますか", close_message)
 
     def test_mosaic_scale_options_update_block_size(self) -> None:
         self.window.load_image(str(self.source))

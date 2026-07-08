@@ -340,7 +340,7 @@ class MainWindow(QMainWindow):
         )
 
     def open_image_dialog(self) -> None:
-        if not self._confirm_discard():
+        if not self._confirm_discard_for_new_image():
             return
         path, _ = QFileDialog.getOpenFileName(self, "PNG画像を開く", "", "PNG画像 (*.png)")
         if path:
@@ -353,7 +353,7 @@ class MainWindow(QMainWindow):
         if Path(paths[0]).suffix.lower() != ".png":
             QMessageBox.warning(self, APP_NAME, "PNGのみ対応しています。")
             return
-        if self._confirm_discard():
+        if self._confirm_discard_for_new_image():
             self.load_image(paths[0])
 
     def dragEnterEvent(self, event) -> None:
@@ -687,20 +687,34 @@ class MainWindow(QMainWindow):
             loaded and self.auto_detect_checkbox.isChecked() and not detecting
         )
 
-    def _confirm_discard(self) -> bool:
+    def _confirm_discard_for_new_image(self) -> bool:
         if not self._dirty:
             return True
         answer = QMessageBox.question(
             self,
-            "未保存の加工",
-            "未保存の加工があります。破棄して別の画像を開きますか？",
+            "別の画像を開きますか？",
+            "現在の画像に未保存の加工があります。\n"
+            "保存せずにこの加工を破棄して、別の画像を開きますか？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _confirm_discard_for_close(self) -> bool:
+        if not self._dirty:
+            return True
+        answer = QMessageBox.question(
+            self,
+            "アプリを終了しますか？",
+            "未保存の加工があります。\n"
+            "保存せずにこの加工を破棄して、アプリを終了しますか？",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
         return answer == QMessageBox.StandardButton.Yes
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if self._confirm_discard():
+        if self._confirm_discard_for_close():
             if self._auto_thread and self._auto_thread.isRunning():
                 self._auto_thread.requestInterruption()
                 self._auto_thread.quit()
