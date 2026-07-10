@@ -11,6 +11,7 @@ a = Analysis(
         ('models/MODEL_SOURCES.md', 'models'),
         ('models/licenses/MobileSAM-LICENSE.txt', 'models/licenses'),
         ('models/licenses/Hotscreen-YOLO-LICENSE.txt', 'models/licenses'),
+        ('assets/app_icon_girl.ico', 'assets'),
     ],
     hiddenimports=[],
     hookspath=[],
@@ -38,6 +39,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='assets/app_icon_girl.ico',
 )
 coll = COLLECT(
     exe,

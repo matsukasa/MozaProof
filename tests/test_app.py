@@ -65,6 +65,9 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(self.window.image_recommended_mosaic_label.text(), "8 px")
         self.assertNotEqual(self.window.image_file_size_label.text(), "—")
 
+    def test_window_icon_is_configured(self) -> None:
+        self.assertFalse(self.window.windowIcon().isNull())
+
     def test_stroke_undo_and_redo_through_window(self) -> None:
         self.window.load_image(str(self.source))
         self.window._begin_stroke(100, 100)

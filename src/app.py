@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import QSignalBlocker, QThread, Qt, QTimer
-from PySide6.QtGui import QAction, QColor, QCloseEvent, QKeySequence, QPixmap
+from PySide6.QtGui import QAction, QColor, QCloseEvent, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -50,10 +50,20 @@ from .settings import (
 from .tools import BrushSettings, ToolType
 
 
+def resource_path(relative_path: str) -> Path:
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        return Path(bundle_root) / relative_path
+    return Path(__file__).resolve().parents[1] / relative_path
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(APP_NAME)
+        icon_path = resource_path("assets/app_icon_girl.ico")
+        if icon_path.is_file():
+            self.setWindowIcon(QIcon(str(icon_path)))
         self.resize(1200, 800)
         self.setAcceptDrops(True)
 
