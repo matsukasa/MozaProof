@@ -1,4 +1,4 @@
-# Pixiv Safe Mosaic
+# MozaProof
 
 PNG画像へモザイクまたは不透明な塗りつぶしを行い、入力画像由来のPNGメタデータを除去して保存する、Windows優先のローカルデスクトップアプリです。画像処理はすべて端末内で完結し、インターネット通信を行いません。
 
@@ -60,7 +60,7 @@ python main.py
 
 保存時は元解像度の画像へ加工を再適用し、新しいRGBA画像としてPNGを生成します。入力PNGのtextual metadata、EXIF、ICCプロファイルなどは引き継ぎません。元画像のアルファチャンネルは維持します。
 
-- 初期ファイル名: `元ファイル名_pixiv_safe.png`
+- 初期ファイル名: `元ファイル名_mozaproof.png`
 - 元画像と同じパスへの保存は禁止
 - 実際に符号化したPNGが32 MiBを超える場合は保存前に警告
 - 一時ファイルを使う原子的保存を行い、失敗時も一時ファイルを削除
@@ -76,10 +76,10 @@ python -m unittest discover -s tests -v
 PyInstallerは`requirements.txt`に含まれています。モデルと必要データを同梱するため、仮想環境を有効にして同梱設定済みのspecファイルからビルドします。
 
 ```powershell
-pyinstaller PixivSafeMosaic.spec
+pyinstaller MozaProof.spec
 ```
 
-生成物は`dist\PixivSafeMosaic\PixivSafeMosaic.exe`です。モデルファイルを含む`_internal`フォルダも必要なので、フォルダ単位で使用・配布してください。
+生成物は`dist\MozaProof\MozaProof.exe`です。モデルファイルを含む`_internal`フォルダも必要なので、フォルダ単位で使用・配布してください。
 
 ## 注意事項
 

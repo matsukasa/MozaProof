@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-APP_NAME = "Pixiv Safe Mosaic"
+APP_NAME = "MozaProof"
 PREVIEW_MAX_EDGE = 1600
 PNG_SIZE_WARNING_BYTES = 32 * 1024 * 1024
 MIN_MOSAIC_BLOCK_SIZE = 4

@@ -161,7 +161,7 @@ class MainWindow(QMainWindow):
 
         auto_group = QGroupBox("自動モザイク")
         auto_layout = QVBoxLayout(auto_group)
-        self.auto_detect_checkbox = QCheckBox("読み込み時に性器を自動検出")
+        self.auto_detect_checkbox = QCheckBox("モザイク対象を自動検出")
         self.auto_detect_checkbox.setChecked(True)
         self.auto_detect_checkbox.toggled.connect(self._auto_detection_toggled)
         self.auto_detect_button = QPushButton("自動検出を再実行")
@@ -517,7 +517,7 @@ class MainWindow(QMainWindow):
         self._auto_thread = thread
         self._auto_worker = worker
         self.auto_detect_button.setEnabled(False)
-        self.auto_detect_status.setText("性器を自動検出中…")
+        self.auto_detect_status.setText("モザイク対象を自動検出中…")
         thread.start()
 
     def _auto_detection_finished(
@@ -627,7 +627,7 @@ class MainWindow(QMainWindow):
     def save_as(self) -> None:
         if not self.processor.is_loaded or self.processor.source_path is None:
             return
-        default_name = f"{self.processor.source_path.stem}_pixiv_safe.png"
+        default_name = f"{self.processor.source_path.stem}_mozaproof.png"
         initial = str(self.processor.source_path.with_name(default_name))
         while True:
             path, _ = QFileDialog.getSaveFileName(

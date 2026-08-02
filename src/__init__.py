@@ -1,1 +1,1 @@
-"""Pixiv Safe Mosaic application package."""
+"""MozaProof application package."""
