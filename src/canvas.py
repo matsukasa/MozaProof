@@ -187,6 +187,13 @@ class ImageCanvas(QGraphicsView):
             return
         super().keyReleaseEvent(event)
 
+    def focusOutEvent(self, event) -> None:
+        # If focus leaves while Space is held, the matching key release is
+        # delivered elsewhere and _space_down would stick, turning later
+        # left-button drags into pans instead of drawing.
+        self._space_down = False
+        super().focusOutEvent(event)
+
     def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls() and any(
             url.isLocalFile() for url in event.mimeData().urls()

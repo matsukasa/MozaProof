@@ -147,14 +147,25 @@ class HotscreenDetector:
             ]
             for x1, y1, x2, y2 in boxes_xyxy
         ]
-        indices = cv2.dnn.NMSBoxes(
-            boxes_xywh,
-            scores.astype(float).tolist(),
-            confidence,
-            cls.iou_threshold,
-        )
-        if len(indices) == 0:
+        # NMS must run per class (as _deduplicate does for the tiled path):
+        # a single class-agnostic pass lets a high-scoring box of a
+        # non-target class suppress a target-class box before the
+        # TARGET_CLASSES filter ever sees it.
+        kept_indices: list[int] = []
+        for class_id in np.unique(class_ids):
+            members = np.flatnonzero(class_ids == class_id)
+            selected = cv2.dnn.NMSBoxes(
+                [boxes_xywh[int(i)] for i in members],
+                [float(scores[int(i)]) for i in members],
+                confidence,
+                cls.iou_threshold,
+            )
+            kept_indices.extend(
+                int(members[int(i)]) for i in np.asarray(selected).reshape(-1)
+            )
+        if not kept_indices:
             return []
+        indices = sorted(kept_indices, key=lambda i: float(scores[i]), reverse=True)
 
         detections = []
         for index in np.asarray(indices).reshape(-1):

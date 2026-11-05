@@ -525,7 +525,13 @@ class MainWindow(QMainWindow):
     ) -> None:
         if generation != self._auto_generation or not self.processor.is_loaded:
             return
-        patch = self.processor.apply_mosaic_mask(result.mask)
+        try:
+            patch = self.processor.apply_mosaic_mask(result.mask)
+        except ValueError as exc:
+            # A size-mismatched mask must reach the user through the normal
+            # failure path instead of dying silently inside a Qt slot.
+            self._auto_detection_failed(generation, str(exc))
+            return
         if patch is not None:
             self.history.push(patch)
             self._dirty = True
@@ -681,8 +687,10 @@ class MainWindow(QMainWindow):
     def _same_as_source(self, path: str) -> bool:
         if self.processor.source_path is None:
             return False
-        return os.path.normcase(os.path.abspath(path)) == os.path.normcase(
-            os.path.abspath(self.processor.source_path)
+        # Compare resolved paths: abspath alone lets aliases (symlinks,
+        # junctions, mapped drives, \\?\ prefixes) bypass the check.
+        return os.path.normcase(Path(path).resolve()) == os.path.normcase(
+            Path(self.processor.source_path).resolve()
         )
 
     def _update_enabled_state(self) -> None:

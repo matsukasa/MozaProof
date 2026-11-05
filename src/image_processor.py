@@ -413,8 +413,8 @@ class ImageProcessor:
         target = Path(destination)
         if target.suffix.lower() != ".png":
             raise ValueError("保存形式はPNGのみです。")
-        if os.path.normcase(os.path.abspath(target)) == os.path.normcase(
-            os.path.abspath(self.source_path)
+        if os.path.normcase(target.resolve()) == os.path.normcase(
+            Path(self.source_path).resolve()
         ):
             raise OriginalOverwriteError("元画像は上書きできません。")
 

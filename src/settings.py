@@ -19,7 +19,13 @@ MOSAIC_SCALE_OPTIONS = (
 
 def pixiv_block_size(width: int, height: int) -> int:
     """Return the requested pixiv-oriented block size for an image."""
-    return max(MIN_MOSAIC_BLOCK_SIZE, round(max(width, height) / 100))
+    # Clamp to the same maximum the UI enforces: without it the info panel
+    # recommended e.g. 60 px for a 6000 px image while the actual initial
+    # value was capped at MAX_MOSAIC_BLOCK_SIZE.
+    return min(
+        MAX_MOSAIC_BLOCK_SIZE,
+        max(MIN_MOSAIC_BLOCK_SIZE, round(max(width, height) / 100)),
+    )
 
 
 def pixiv_brush_size(block_size: int) -> int:
