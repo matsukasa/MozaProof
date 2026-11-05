@@ -101,9 +101,13 @@ class ImageProcessor:
         assert self.mosaic_mask is not None and self.fill_layer is not None
         if self._preview_layers_cache is None:
             size = self.preview_original.size
+            # BILINEAR, not NEAREST: at preview scale a 1px mask stroke can
+            # fall between NEAREST sample points and vanish from the
+            # preview while still applying to the saved image. A graded
+            # BILINEAR edge keeps every stroke visible.
             self._preview_layers_cache = (
-                self.mosaic_mask.resize(size, Image.Resampling.NEAREST),
-                self.fill_layer.resize(size, Image.Resampling.NEAREST),
+                self.mosaic_mask.resize(size, Image.Resampling.BILINEAR),
+                self.fill_layer.resize(size, Image.Resampling.BILINEAR),
             )
         return self._preview_layers_cache
 
@@ -271,7 +275,7 @@ class ImageProcessor:
         size = self.preview_original.size
         mosaic_mask, fill_layer = self._preview_layers()
         if self._stroke_mask is not None and self._stroke_tool is not None:
-            stroke = self._stroke_mask.resize(size, Image.Resampling.NEAREST)
+            stroke = self._stroke_mask.resize(size, Image.Resampling.BILINEAR)
             mosaic_mask, fill_layer = self._apply_temporary_stroke(
                 mosaic_mask, fill_layer, stroke
             )
