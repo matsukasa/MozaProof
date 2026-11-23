@@ -9,7 +9,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PIL import Image
-from PySide6.QtCore import QPointF, QMimeData, Qt, QUrl
+from PySide6.QtCore import QPointF, QMimeData, QSettings, Qt, QUrl
 from PySide6.QtGui import QDropEvent
 from PySide6.QtWidgets import QApplication, QComboBox, QMessageBox, QSpinBox
 
@@ -35,7 +35,8 @@ class MainWindowTests(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.source = Path(self.temp_dir.name) / "sample.png"
         Image.new("RGBA", (800, 400), (30, 60, 90, 180)).save(self.source)
-        self.window = MainWindow()
+        self.settings_path = str(Path(self.temp_dir.name) / "settings.ini")
+        self.window = MainWindow(QSettings(self.settings_path, QSettings.Format.IniFormat))
         self.window.auto_detect_checkbox.setChecked(False)
 
     def tearDown(self) -> None:
@@ -67,6 +68,42 @@ class MainWindowTests(unittest.TestCase):
 
     def test_window_icon_is_configured(self) -> None:
         self.assertFalse(self.window.windowIcon().isNull())
+
+    def test_png_settings_are_restored_and_used_for_save(self) -> None:
+        self.assertEqual(self.window.compression_level.value(), 1)
+        self.assertFalse(self.window.metadata_combo.currentData())
+        self.window.compression_level.setValue(7)
+        self.window.metadata_combo.setCurrentIndex(1)
+        self.window.settings.sync()
+        reopened = MainWindow(QSettings(self.settings_path, QSettings.Format.IniFormat))
+        self.addCleanup(reopened.deleteLater)
+        self.addCleanup(reopened.close)
+        self.assertEqual(reopened.compression_level.value(), 7)
+        self.assertTrue(reopened.metadata_combo.currentData())
+        reopened.auto_detect_checkbox.setChecked(False)
+        reopened.load_image(str(self.source))
+        output = Path(self.temp_dir.name) / "out.png"
+        with (
+            patch("src.app.QFileDialog.getSaveFileName", return_value=(str(output), "")),
+            patch("src.app.QMessageBox.information"),
+            patch.object(reopened.processor, "encode_png", wraps=reopened.processor.encode_png) as encode,
+        ):
+            reopened.save_as()
+        self.assertTrue(output.is_file())
+        self.assertEqual(encode.call_args.kwargs, {"compress_level": 7, "keep_metadata": True})
+
+    def test_unsupported_metadata_warning_can_cancel_save(self) -> None:
+        self.window.load_image(str(self.source))
+        self.window.metadata_combo.setCurrentIndex(1)
+        self.window.processor.unsupported_png_chunks = ("vpAG",)
+        output = Path(self.temp_dir.name) / "out.png"
+        with (
+            patch("src.app.QFileDialog.getSaveFileName", return_value=(str(output), "")),
+            patch("src.app.QMessageBox.warning", return_value=QMessageBox.StandardButton.No) as warning,
+        ):
+            self.window.save_as()
+        self.assertIn("vpAG", warning.call_args.args[2])
+        self.assertFalse(output.exists())
 
     def test_stroke_undo_and_redo_through_window(self) -> None:
         self.window.load_image(str(self.source))

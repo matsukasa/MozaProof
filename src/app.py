@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import QSignalBlocker, QThread, Qt, QTimer
+from PySide6.QtCore import QSettings, QSignalBlocker, QThread, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QCloseEvent, QIcon, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QSlider,
     QSpinBox,
     QSplitter,
@@ -58,8 +59,9 @@ def resource_path(relative_path: str) -> Path:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, settings: QSettings | None = None) -> None:
         super().__init__()
+        self.settings = settings if settings is not None else QSettings("MozaProof", "MozaProof")
         self.setWindowTitle(APP_NAME)
         icon_path = resource_path("assets/app_icon_girl.ico")
         if icon_path.is_file():
@@ -132,7 +134,10 @@ class MainWindow(QMainWindow):
         self.side_panel = self._create_side_panel()
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.canvas)
-        splitter.addWidget(self.side_panel)
+        sidebar = QScrollArea()
+        sidebar.setWidgetResizable(True)
+        sidebar.setWidget(self.side_panel)
+        splitter.addWidget(sidebar)
         splitter.setStretchFactor(0, 1)
         splitter.setSizes([940, 260])
         self.setCentralWidget(splitter)
@@ -238,6 +243,26 @@ class MainWindow(QMainWindow):
         colors_layout.addWidget(white)
         colors_layout.addWidget(self.custom_color_button)
         layout.addWidget(colors_group)
+
+        save_group = QGroupBox("PNG保存設定")
+        save_layout = QFormLayout(save_group)
+        self.compression_level = QSpinBox()
+        self.compression_level.setRange(0, 9)
+        self.compression_level.setValue(self.settings.value("png/compressLevel", 1, type=int))
+        self.compression_level.setToolTip("0：無圧縮、1：速度優先、9：容量優先。画質はどれも同じです。")
+        self.compression_level.valueChanged.connect(
+            lambda level: self.settings.setValue("png/compressLevel", level)
+        )
+        save_layout.addRow("圧縮レベル", self.compression_level)
+        self.metadata_combo = QComboBox()
+        self.metadata_combo.addItem("削除する", False)
+        self.metadata_combo.addItem("保持する", True)
+        self.metadata_combo.setCurrentIndex(int(self.settings.value("png/keepMetadata", False, type=bool)))
+        self.metadata_combo.currentIndexChanged.connect(
+            lambda _: self.settings.setValue("png/keepMetadata", self.metadata_combo.currentData())
+        )
+        save_layout.addRow("元画像のメタデータ", self.metadata_combo)
+        layout.addWidget(save_group)
 
         self.compare_button = QPushButton("押している間、加工前を表示")
         self.compare_button.pressed.connect(self._show_original)
@@ -653,10 +678,24 @@ class MainWindow(QMainWindow):
                 continue
             break
 
+        keep_metadata = self.metadata_combo.currentData()
+        if keep_metadata and self.processor.unsupported_png_chunks:
+            chunks = ", ".join(self.processor.unsupported_png_chunks)
+            answer = QMessageBox.warning(
+                self,
+                "一部のPNG情報を保持できません",
+                f"次のPNGチャンクは保存対象外です。\n{chunks}\nこれらを除いて保存しますか？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
             data = self.processor.encode_png(
-                self.brush.mosaic_block_size, self._mask_dilation_px()
+                self.brush.mosaic_block_size, self._mask_dilation_px(),
+                compress_level=self.compression_level.value(), keep_metadata=keep_metadata,
             )
         except (OSError, ValueError, RuntimeError) as exc:
             QMessageBox.critical(self, "保存エラー", f"PNGの生成に失敗しました。\n{exc}")

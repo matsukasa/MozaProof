@@ -8,14 +8,13 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from src.auto_censor import (
-    AUTO_MASK_EDGE_PADDING_PX,
     AutoCensorEngine,
     HotscreenDetector,
 )
 
 
 class FakeDetector:
-    def detect(self, _path: str):
+    def detect(self, _image, confidence):
         return [
             {
                 "class": "FEMALE_GENITALIA_EXPOSED",
@@ -40,6 +39,23 @@ class FakeSegmenter:
 
 
 class AutoCensorEngineTests(unittest.TestCase):
+    def test_default_threshold_filters_weak_targets_and_allows_override(self) -> None:
+        class WeakDetector(FakeDetector):
+            def detect(self, image, confidence):
+                self.threshold = confidence
+                candidate = super().detect(image, confidence)[0]
+                return [dict(candidate, score=0.20)]
+
+        detector = WeakDetector()
+        engine = AutoCensorEngine(detector=detector, segmenter_factory=FakeSegmenter)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "image.png"
+            Image.new("RGB", (100, 80)).save(path)
+            self.assertEqual(engine.detect(path).detection_count, 0)
+            self.assertEqual(detector.threshold, 0.25)
+            self.assertEqual(engine.detect(path, confidence=0.15).detection_count, 1)
+            self.assertEqual(detector.threshold, 0.15)
+
     def test_detected_box_has_no_automatic_margin(self) -> None:
         self.assertEqual(
             AutoCensorEngine._detected_box([20, 20, 30, 20], (100, 80)),
@@ -102,16 +118,35 @@ class AutoCensorEngineTests(unittest.TestCase):
         self.assertEqual(result.segmented_count, 1)
         bbox = result.mask.getbbox()
         self.assertIsNotNone(bbox)
-        self.assertEqual(bbox[0], 20 - AUTO_MASK_EDGE_PADDING_PX)
+        self.assertEqual(bbox[0], 19)  # A 20 px target uses a one-pixel border.
         self.assertEqual(result.mask.getpixel((bbox[0], bbox[1])), 0)
         self.assertEqual(
             result.mask.getpixel(((bbox[0] + bbox[2]) // 2, (bbox[1] + bbox[3]) // 2)),
             255,
         )
 
+    def test_local_masks_map_to_original_coordinates_at_opposite_edges(self) -> None:
+        class EdgeDetector:
+            def detect(self, image, confidence):
+                return [
+                    {"class": "MALE_GENITALIA_EXPOSED", "score": 0.9, "box": box}
+                    for box in ([0, 0, 12, 20], [980, 780, 20, 20])
+                ]
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "edges.png"
+            Image.new("RGB", (1000, 800)).save(path)
+            engine = AutoCensorEngine(detector=EdgeDetector(), segmenter_factory=FakeSegmenter)
+            result = engine.detect(path)
+        self.assertEqual(result.segmented_count, 2)
+        for point in [(6, 0), (999, 790)]:
+            self.assertEqual(result.mask.getpixel(point), 255)
+        for point in [(14, 10), (977, 790), (500, 400)]:
+            self.assertEqual(result.mask.getpixel(point), 0)
+
     def test_unrelated_detection_is_ignored_without_loading_segmenter(self) -> None:
         class SafeDetector:
-            def detect(self, _path):
+            def detect(self, _image, confidence):
                 return [{"class": "FACE_FEMALE", "score": 0.99, "box": [1, 1, 5, 5]}]
 
         def fail_factory(_model_dir):
@@ -128,7 +163,7 @@ class AutoCensorEngineTests(unittest.TestCase):
 
     def test_anus_detection_is_not_censored_automatically(self) -> None:
         class AnusDetector:
-            def detect(self, _image):
+            def detect(self, _image, confidence):
                 return [
                     {
                         "class": "ANUS_EXPOSED",

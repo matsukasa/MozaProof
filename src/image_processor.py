@@ -4,8 +4,11 @@ import io
 import math
 import os
 import tempfile
+import zlib
 from pathlib import Path
 
+import cv2
+import numpy as np
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from .history import LayerPatch
@@ -21,6 +24,42 @@ class OriginalOverwriteError(ValueError):
     pass
 
 
+def _read_png_metadata(source, *, grayscale: bool) -> tuple[bytes, tuple[str, ...]]:
+    # Copy only chunks that remain meaningful when the pixels are saved as RGBA.
+    supported = {b"tEXt", b"zTXt", b"iTXt", b"eXIf", b"pHYs", b"gAMA", b"cHRM", b"sRGB", b"cICP", b"mDCV", b"cLLI"}
+    if not grayscale:
+        supported.add(b"iCCP")
+    structural = {b"IHDR", b"PLTE", b"IDAT", b"tRNS"}
+    metadata = bytearray()
+    unsupported = set()
+    file_size = source.seek(0, os.SEEK_END)
+    source.seek(8)
+    while source.tell() < file_size:
+        header = source.read(8)
+        if len(header) != 8:
+            break
+        length = int.from_bytes(header[:4], "big")
+        kind = header[4:]
+        if kind == b"IEND":
+            break
+        if length + 4 > file_size - source.tell():
+            raise ValueError("PNGチャンクの長さが不正です。")
+        if kind in supported:
+            data = source.read(length)
+            crc = source.read(4)
+            if zlib.crc32(data, zlib.crc32(kind)) == int.from_bytes(crc, "big"):
+                metadata.extend(header)
+                metadata.extend(data)
+                metadata.extend(crc)
+            else:
+                unsupported.add(kind)
+        else:
+            source.seek(length + 4, os.SEEK_CUR)
+            if kind not in structural:
+                unsupported.add(kind)
+    return bytes(metadata), tuple(k.decode("ascii", "replace") for k in sorted(unsupported))
+
+
 class ImageProcessor:
     def __init__(self) -> None:
         self.source_path: Path | None = None
@@ -31,6 +70,8 @@ class ImageProcessor:
         self.preview_scale = 1.0
         self.source_file_size = 0
         self.has_transparency = False
+        self._png_metadata = b""
+        self.unsupported_png_chunks: tuple[str, ...] = ()
         self._preview_layers_cache: tuple[Image.Image, Image.Image] | None = None
         self._preview_pixelated_cache: dict[int, Image.Image] = {}
 
@@ -56,11 +97,14 @@ class ImageProcessor:
         if source.suffix.lower() != ".png":
             raise ImageLoadError("PNGのみ対応しています。")
         try:
-            with Image.open(source) as opened:
+            with source.open("rb") as stream, Image.open(stream) as opened:
                 if opened.format != "PNG":
                     raise ImageLoadError("PNGのみ対応しています。")
                 opened.load()
                 original = opened.convert("RGBA")
+                metadata, unsupported = _read_png_metadata(
+                    stream, grayscale=opened.mode not in ("RGB", "RGBA", "P", "PA")
+                )
         except ImageLoadError:
             raise
         except (OSError, ValueError) as exc:
@@ -68,6 +112,8 @@ class ImageProcessor:
 
         self.source_path = source.resolve()
         self.original_image = original
+        self._png_metadata = metadata
+        self.unsupported_png_chunks = unsupported
         try:
             self.source_file_size = source.stat().st_size
         except OSError:
@@ -115,7 +161,7 @@ class ImageProcessor:
         assert self.preview_original is not None
         cached = self._preview_pixelated_cache.get(block_size)
         if cached is None:
-            cached = self._pixelate(self.preview_original.convert("RGB"), block_size)
+            cached = self._pixelate(self.preview_original, block_size)
             self._preview_pixelated_cache = {block_size: cached}
         return cached
 
@@ -331,18 +377,32 @@ class ImageProcessor:
         *,
         pixelated: Image.Image | None = None,
     ) -> Image.Image:
-        source = original.convert("RGBA")
-        original_rgb = source.convert("RGB")
-        if pixelated is None:
-            pixelated = cls._pixelate(original_rgb, block_size)
+        result = original.copy()
         effective_mask = mosaic_mask
-        if dilation_px > 0 and effective_mask.getbbox() is not None:
+        if dilation_px > 0:
             effective_mask = cls._dilate_mask_by_pixels(effective_mask, dilation_px)
-        result_rgb = Image.composite(pixelated, original_rgb, effective_mask)
-        fill_rgb = fill_layer.convert("RGB")
-        result_rgb = Image.composite(fill_rgb, result_rgb, fill_layer.getchannel("A"))
-        result = result_rgb.convert("RGBA")
-        result.putalpha(source.getchannel("A"))
+        bounds = effective_mask.getbbox()
+        if bounds and block_size > 1:
+            # Align the crop to the same grid as a full-image render.
+            x1, y1, x2, y2 = bounds
+            width, height = original.size
+            box = (
+                x1 - x1 % block_size, y1 - y1 % block_size,
+                min(width, x2 + (-x2) % block_size),
+                min(height, y2 + (-y2) % block_size),
+            )
+            if pixelated is None:
+                region = original if box == (0, 0, width, height) else original.crop(box)
+                mosaic = cls._pixelate(region, block_size)
+            else:
+                mosaic = pixelated.crop(box)
+            result.paste(mosaic, box, effective_mask.crop(box))
+        fill_bounds = fill_layer.getbbox()
+        if fill_bounds:
+            fill = fill_layer.crop(fill_bounds)
+            result.paste(fill, fill_bounds, fill.getchannel("A"))
+        if bounds or fill_bounds:
+            result.putalpha(original.getchannel("A"))
         result.info.clear()
         return result
 
@@ -351,7 +411,8 @@ class ImageProcessor:
         pixels = max(0, int(radius))
         if pixels <= 0 or mask.getbbox() is None:
             return mask
-        return mask.filter(ImageFilter.MaxFilter(pixels * 2 + 1))
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (pixels * 2 + 1,) * 2)
+        return Image.fromarray(cv2.dilate(np.asarray(mask), kernel))
 
     @staticmethod
     def _dilate_mask_by_block(mask: Image.Image, block_size: int) -> Image.Image:
@@ -375,30 +436,29 @@ class ImageProcessor:
     def _pixelate(image: Image.Image, block_size: int) -> Image.Image:
         block = max(1, int(block_size))
         width, height = image.size
-        padded_width = math.ceil(width / block) * block
-        padded_height = math.ceil(height / block) * block
-        if (padded_width, padded_height) == image.size:
-            padded = image
-        else:
-            padded = Image.new("RGB", (padded_width, padded_height))
-            padded.paste(image, (0, 0))
-            if padded_width > width:
-                edge = image.crop((width - 1, 0, width, height)).resize(
-                    (padded_width - width, height)
-                )
-                padded.paste(edge, (width, 0))
-            if padded_height > height:
-                edge = padded.crop((0, height - 1, padded_width, height)).resize(
-                    (padded_width, padded_height - height)
-                )
-                padded.paste(edge, (0, height))
-        small = padded.resize(
-            (padded_width // block, padded_height // block), Image.Resampling.BOX
+        if block == 1:
+            return image
+        pixels = np.asarray(image)
+        pad_right, pad_bottom = (-width) % block, (-height) % block
+        if pad_right or pad_bottom:
+            pixels = cv2.copyMakeBorder(pixels, 0, pad_bottom, 0, pad_right, cv2.BORDER_REPLICATE)
+        padded_height, padded_width = pixels.shape[:2]
+        cells = cv2.resize(
+            pixels, (padded_width // block, padded_height // block),
+            interpolation=cv2.INTER_AREA,
         )
-        pixelated = small.resize(padded.size, Image.Resampling.NEAREST)
-        return pixelated.crop((0, 0, width, height))
+        expanded = cv2.resize(
+            cells, (padded_width, padded_height), interpolation=cv2.INTER_NEAREST
+        )
+        result = Image.fromarray(expanded)
+        return result.crop((0, 0, width, height)) if pad_right or pad_bottom else result
 
-    def encode_png(self, block_size: int, dilation_px: int = 0) -> bytes:
+    def encode_png(
+        self, block_size: int, dilation_px: int = 0, *, compress_level: int = 1,
+        keep_metadata: bool = False,
+    ) -> bytes:
+        if not isinstance(compress_level, int) or not 0 <= compress_level <= 9:
+            raise ValueError("PNG圧縮レベルは0〜9で指定してください。")
         final_image = self.render_full(block_size, dilation_px)
         final_image.info.clear()
         buffer = io.BytesIO()
@@ -406,9 +466,13 @@ class ImageProcessor:
             buffer,
             format="PNG",
             optimize=False,
-            compress_level=9,
+            compress_level=compress_level,
             pnginfo=None,
         )
+        if keep_metadata and self._png_metadata:
+            # Insert the original ancillary chunks after the fixed signature and IHDR.
+            with buffer.getbuffer() as png:
+                return b"".join((png[:33], self._png_metadata, png[33:]))
         return buffer.getvalue()
 
     def save_encoded_png(self, destination: str | os.PathLike[str], data: bytes) -> None:

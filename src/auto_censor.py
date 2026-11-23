@@ -37,7 +37,7 @@ HOTSCREEN_LABELS = (
     "FEET_EXPOSED",
     "EYE",
 )
-DEFAULT_CONFIDENCE = 0.15
+DEFAULT_CONFIDENCE = 0.25
 AUTO_MASK_EDGE_PADDING_PX = 4
 
 
@@ -212,10 +212,9 @@ class HotscreenDetector:
     def detect(
         self, image_bgr: np.ndarray, confidence: float = DEFAULT_CONFIDENCE
     ) -> list[dict]:
-        detections = self._detect_single(image_bgr, confidence)
+        proposal_confidence = min(0.15, confidence)
+        detections = self._detect_single(image_bgr, proposal_confidence)
         height, width = image_bgr.shape[:2]
-        if max(width, height) <= self.tile_threshold:
-            return detections
 
         tile_width = max(self.input_size, round(width * self.tile_fraction))
         tile_height = max(self.input_size, round(height * self.tile_fraction))
@@ -227,9 +226,9 @@ class HotscreenDetector:
             (0, height - tile_height),
             (width - tile_width, height - tile_height),
         }
-        for left, top in starts:
+        for left, top in sorted(starts) if max(width, height) > self.tile_threshold else ():
             tile = image_bgr[top : top + tile_height, left : left + tile_width]
-            for item in self._detect_single(tile, confidence):
+            for item in self._detect_single(tile, proposal_confidence):
                 translated = dict(item)
                 box = item["box"]
                 translated["box"] = [
@@ -239,7 +238,35 @@ class HotscreenDetector:
                     box[3],
                 ]
                 detections.append(translated)
-        return self._deduplicate(detections, confidence)
+        candidates = self._deduplicate(detections, proposal_confidence)
+        accepted = [item for item in candidates if item["score"] >= confidence]
+        weak_targets = [
+            item for item in candidates
+            if item["score"] < confidence and item["class"] in TARGET_CLASSES
+        ]
+        # Bound extra inference on crowded images; candidates are score-sorted.
+        for candidate in weak_targets[:6]:
+            x, y, w, h = candidate["box"]
+            margin = max(w, h)
+            left, top = max(0, x - margin), max(0, y - margin)
+            right, bottom = min(width, x + w + margin), min(height, y + h + margin)
+            if (left, top, right, bottom) == (0, 0, width, height):
+                continue
+            crop = image_bgr[top:bottom, left:right]
+            for match in self._detect_single(crop, confidence):
+                if match["class"] != candidate["class"] or match["score"] < confidence:
+                    continue
+                mx, my, mw, mh = match["box"]
+                mx += left
+                my += top
+                overlap_w = max(0, min(x + w, mx + mw) - max(x, mx))
+                overlap_h = max(0, min(y + h, my + mh) - max(y, my))
+                intersection = overlap_w * overlap_h
+                union = w * h + mw * mh - intersection
+                if union > 0 and intersection / union >= self.iou_threshold:
+                    accepted.append({**match, "box": [mx, my, mw, mh]})
+                    break
+        return self._deduplicate(accepted, proposal_confidence) if weak_targets else accepted
 
 
 class MobileSamSegmenter:
@@ -390,7 +417,7 @@ class AutoCensorEngine:
         image_bgr = cv2.cvtColor(np.asarray(image_rgb), cv2.COLOR_RGB2BGR)
         detections = [
             item
-            for item in self.detector.detect(image_bgr)
+            for item in self.detector.detect(image_bgr, confidence=confidence)
             if item.get("class") in TARGET_CLASSES
             and float(item.get("score", 0)) >= confidence
         ]
@@ -398,24 +425,48 @@ class AutoCensorEngine:
             return AutoCensorResult(output, len(detections), 0)
 
         segmenter = self.segmenter_factory(self.model_dir)
-        encoded = segmenter.encode(image_bgr)
+        full_encoding = None
         segmented_count = 0
 
         for detection in detections:
             if cancel_check():
                 break
             box = self._detected_box(detection["box"], image_size)
-            shape_mask = segmenter.segment_box(encoded, box)
+            x1, y1, x2, y2 = box
+            if x2 <= x1 or y2 <= y1:
+                continue
+            # Keep surrounding context while giving small targets more encoder pixels.
+            context = max(128, x2 - x1, y2 - y1)
+            left, top = max(0, x1 - context), max(0, y1 - context)
+            right = min(image_size[0], x2 + context)
+            bottom = min(image_size[1], y2 + context)
+            if (right - left) * (bottom - top) < image_size[0] * image_size[1] / 2:
+                encoded = segmenter.encode(image_bgr[top:bottom, left:right])
+            else:
+                if full_encoding is None:
+                    full_encoding = segmenter.encode(image_bgr)
+                encoded = full_encoding
+                left = top = 0
+            local_box = (x1 - left, y1 - top, x2 - left, y2 - top)
+            local_mask = segmenter.segment_box(encoded, local_box)
+            shape_mask = local_mask[local_box[1]:local_box[3], local_box[0]:local_box[2]]
+            region = Image.new("L", (x2 - x1, y2 - y1))
             if shape_mask.any():
                 shape_image = Image.fromarray(
                     np.where(shape_mask, 255, 0).astype(np.uint8), mode="L"
                 )
-                output = ImageChops.lighter(output, shape_image)
+                region = shape_image
             else:
-                self._ellipse_fallback(output, box)
+                self._ellipse_fallback(region, (0, 0, region.width - 1, region.height - 1))
+            radius = min(AUTO_MASK_EDGE_PADDING_PX, max(1, round(min(region.size) * 0.04)))
+            padded_box = (max(0, x1 - radius), max(0, y1 - radius),
+                          min(image_size[0], x2 + radius), min(image_size[1], y2 + radius))
+            previous = output.crop(padded_box)
+            local = Image.new("L", previous.size)
+            local.paste(region, (x1 - padded_box[0], y1 - padded_box[1]))
+            output.paste(ImageChops.lighter(previous, self._pad_mask_edges(local, radius)), padded_box)
             segmented_count += 1
 
-        output = self._pad_mask_edges(output)
         return AutoCensorResult(output, len(detections), segmented_count)
 
 
